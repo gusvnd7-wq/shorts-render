@@ -1,0 +1,53 @@
+# 공용 원격 실행(tools/remote-run) — 손으로 부를 때만 돎: gh workflow run remote.yml -f job=<id> -f datasets=<slug,…>
+# Kaggle 커널과 같은 꼴: /kaggle/input/<데이터 이름>/ 읽고 /kaggle/working/ 에 씀. 실행 파일은 Kaggle 비공개 데이터 robbin0707/remote-jobs 의 run_<id>.py
+# 이 저장소엔 작업 내용·데이터가 없음(공개 저장소여도 안전)
+name: remote
+run-name: ${{ inputs.job }}
+on:
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "작업 id (remote-jobs 안 run_<id>.py)"
+        required: true
+      datasets:
+        description: "Kaggle 데이터 slug 쉼표 목록 → /kaggle/input/<이름>/"
+        required: false
+        default: ""
+      runner:
+        description: "러너 라벨"
+        required: false
+        default: "ubuntu-24.04"
+permissions:
+  contents: read
+jobs:
+  run:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 355
+    steps:
+      - name: 준비
+        env:
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+          JOB: ${{ inputs.job }}
+          DATASETS: ${{ inputs.datasets }}
+        run: |
+          [[ "$JOB" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "작업 id 이상"; exit 1; }
+          [[ "$DATASETS" =~ ^[A-Za-z0-9_,/.-]*$ ]] || { echo "데이터 목록 이상"; exit 1; }
+          pip install --quiet kaggle==2.2.4
+          sudo mkdir -p /kaggle/input /kaggle/working /kaggle/jobs
+          sudo chown -R "$USER" /kaggle
+          for ds in ${DATASETS//,/ }; do kaggle datasets download "$ds" -p "/kaggle/input/${ds#*/}" --unzip; done
+          kaggle datasets download robbin0707/remote-jobs -f "run_$JOB.py" -p /kaggle/jobs --unzip
+          cp "/kaggle/jobs/run_$JOB.py" /tmp/run.py
+          rm -rf /kaggle/jobs
+          ls -la /kaggle/input/*/ | head -40
+          echo "RR_READY nproc=$(nproc) mem=$(free -g | awk '/Mem/{print $2}')G"
+      - name: 실행
+        run: python3 /tmp/run.py
+      - name: 결과 올리기
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.job }}
+          path: /kaggle/working
+          retention-days: 2
+          if-no-files-found: warn
