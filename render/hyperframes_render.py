@@ -46,11 +46,20 @@ try:
             rc2, o2, _ = sh(f"ffmpeg -v error -y -i '{clip}' -i {res} -loop 1 -i '{mk}' -filter_complex \"[1:v]scale={w}:{h}:flags=lanczos,fps={fps},format=rgba[ip0];[2:v]scale={w}:{h},format=gray,gblur=sigma=1.5[m];[ip0][m]alphamerge[ip];[0:v][ip]overlay=0:0:shortest=1,format=yuv420p[v]\" -map '[v]' -shortest -c:v libx264 -preset {'ultrafast' if crf == 34 else 'slow'} -crf {crf} /tmp/pp/{nm}.fixed.mp4 && mv /tmp/pp/{nm}.fixed.mp4 '{clip}'", 900)
             if rc2 == 0: RES["inpaint"]["ok"] += 1
             else: RES["inpaint"]["fail"].append([nm, "merge " + o2[-300:]])
+    # TEXT-PLACE(10/22, 스포츠 real-reel): 프로젝트에 _tp/job.json이 있으면 얼굴 검출(YuNet) → 자막 자리 → index.html 반영 뒤 렌더. 실패해도 렌더는 예전 자리로 계속
+    tps = [n for n in job["projects"] if os.path.exists(f"{P}/{n}/_tp/job.json")]
+    if tps:
+        sh("pip install -q opencv-python-headless > /dev/null 2>&1; python3 -c 'import cv2;print(cv2.__version__)'", 900)
+        for name in tps:
+            rc, out, sec = sh(f"cd '{P}/{name}' && node _tp/tp-place.mjs .", 900, ENV)
+            try: tp = json.load(open(f"{P}/{name}/_tp/result.json"))
+            except Exception: tp = {"ok": False, "why": out[-600:]}
+            RES["items"].setdefault(name, {})["tp"] = tp
     for name in job["projects"]:
         rc, out, sec = sh(f"cd '{P}/{name}' && hyperframes render --output '{W}/{name}.mp4' --fps {job['fps']} --quality {job['quality']} --crf {job['crf']}", 5400, ENV)
         ok = rc == 0 and os.path.exists(f"{W}/{name}.mp4")
-        RES["items"][name] = {"ok": ok, "render_s": sec, "tail": "" if ok else out[-1200:]}
-    RES["ok"] = all(v["ok"] for v in RES["items"].values())
+        RES["items"].setdefault(name, {}).update({"ok": ok, "render_s": sec, "tail": "" if ok else out[-1200:]})
+    RES["ok"] = all(v.get("ok") for v in RES["items"].values())
 except Exception as e:
     RES["error"] = repr(e)
 done()
