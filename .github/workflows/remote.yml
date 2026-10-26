@@ -48,6 +48,10 @@ jobs:
           kaggle datasets download robbin0707/remote-jobs -f "run_$JOB.py" -p /kaggle/jobs --unzip
           cp "/kaggle/jobs/run_$JOB.py" /tmp/run.py
           rm -rf /kaggle/jobs
+          # 2026-10-26: GitHub 러너엔 ffmpeg가 없음(숏큐멘터리 학습이 컷 1개·자막 0줄로 '성공') → 작업이 ffmpeg를 쓰면 설치
+          if grep -q ffmpeg /tmp/run.py && ! command -v ffmpeg >/dev/null; then
+            sudo apt-get -qq update >/dev/null && sudo apt-get -qq install -y ffmpeg >/dev/null && echo "ffmpeg 설치: $(ffmpeg -version | head -1)"
+          fi
           ls -la /kaggle/input/*/ | head -40
           echo "RR_READY nproc=$(nproc) mem=$(free -g | awk '/Mem/{print $2}')G"
       - name: 실행
