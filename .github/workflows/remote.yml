@@ -35,7 +35,16 @@ jobs:
           pip install --quiet kaggle==2.2.4
           sudo mkdir -p /kaggle/input /kaggle/working /kaggle/jobs
           sudo chown -R "$USER" /kaggle
-          for ds in ${DATASETS//,/ }; do kaggle datasets download "$ds" -p "/kaggle/input/${ds#*/}" --unzip; done
+          for ds in ${DATASETS//,/ }; do
+            d="/kaggle/input/${ds#*/}"
+            if ! kaggle datasets download "$ds" -p "$d" --unzip; then
+              echo "통째 내려받기 실패 → 파일별로 받음(새로 만든 데이터는 통짜 압축본이 아직 없을 수 있음)"
+              mkdir -p "$d"
+              for f in $(kaggle datasets files "$ds" --page-size 200 | awk '$2 ~ /^[0-9]+$/ {print $1}'); do
+                kaggle datasets download "$ds" -f "$f" -p "$d" --unzip
+              done
+            fi
+          done
           kaggle datasets download robbin0707/remote-jobs -f "run_$JOB.py" -p /kaggle/jobs --unzip
           cp "/kaggle/jobs/run_$JOB.py" /tmp/run.py
           rm -rf /kaggle/jobs
