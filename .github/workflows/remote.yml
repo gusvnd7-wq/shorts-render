@@ -17,6 +17,10 @@ on:
         description: "러너 라벨"
         required: false
         default: "ubuntu-24.04"
+      store:
+        description: "1이면 실행 파일·데이터를 Kaggle 대신 이 저장소 릴리스 rr-store에서 받음(KAGGLE-OFF 10/28, 비공개 저장소만)"
+        required: false
+        default: ""
 permissions:
   contents: read
 jobs:
@@ -27,25 +31,36 @@ jobs:
       - name: 준비
         env:
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           JOB: ${{ inputs.job }}
           DATASETS: ${{ inputs.datasets }}
+          STORE: ${{ inputs.store }}
         run: |
           [[ "$JOB" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "작업 id 이상"; exit 1; }
-          [[ "$DATASETS" =~ ^[A-Za-z0-9_,/.-]*$ ]] || { echo "데이터 목록 이상"; exit 1; }
-          pip install --quiet kaggle==2.2.4
+          [[ "$DATASETS" =~ ^[A-Za-z0-9_,/.:-]*$ ]] || { echo "데이터 목록 이상"; exit 1; }
           sudo mkdir -p /kaggle/input /kaggle/working /kaggle/jobs
           sudo chown -R "$USER" /kaggle
-          for ds in ${DATASETS//,/ }; do
-            d="/kaggle/input/${ds#*/}"
-            if ! kaggle datasets download "$ds" -p "$d" --unzip; then
-              echo "통째 내려받기 실패 → 파일별로 받음(새로 만든 데이터는 통짜 압축본이 아직 없을 수 있음)"
-              mkdir -p "$d"
-              for f in $(kaggle datasets files "$ds" --page-size 200 | awk '$2 ~ /^[0-9]+$/ {print $1}'); do
-                kaggle datasets download "$ds" -f "$f" -p "$d" --unzip
-              done
-            fi
-          done
-          kaggle datasets download robbin0707/remote-jobs -f "run_$JOB.py" -p /kaggle/jobs --unzip
+          if [ "$STORE" = "1" ]; then
+            # KAGGLE-OFF(10/28 Kaggle 계정 정지): PC(remote.mjs)가 띄우기 직전 이 저장소 릴리스 rr-store에 올린 run_<id>.py·<이름>.bin을 받음
+            gh release download rr-store -R "$GITHUB_REPOSITORY" -p "run_$JOB.py" -D /kaggle/jobs
+            for ds in ${DATASETS//,/ }; do
+              s="${ds#local:}"; mkdir -p "/kaggle/input/$s"
+              gh release download rr-store -R "$GITHUB_REPOSITORY" -p "$s.bin" -O "/kaggle/input/$s/bundle.bin"
+            done
+          else
+            pip install --quiet kaggle==2.2.4
+            for ds in ${DATASETS//,/ }; do
+              d="/kaggle/input/${ds#*/}"
+              if ! kaggle datasets download "$ds" -p "$d" --unzip; then
+                echo "통째 내려받기 실패 → 파일별로 받음(새로 만든 데이터는 통짜 압축본이 아직 없을 수 있음)"
+                mkdir -p "$d"
+                for f in $(kaggle datasets files "$ds" --page-size 200 | awk '$2 ~ /^[0-9]+$/ {print $1}'); do
+                  kaggle datasets download "$ds" -f "$f" -p "$d" --unzip
+                done
+              fi
+            done
+            kaggle datasets download robbin0707/remote-jobs -f "run_$JOB.py" -p /kaggle/jobs --unzip
+          fi
           cp "/kaggle/jobs/run_$JOB.py" /tmp/run.py
           rm -rf /kaggle/jobs
           # 2026-10-26: GitHub 러너엔 ffmpeg가 없음(숏큐멘터리 학습이 컷 1개·자막 0줄로 '성공') → 작업이 ffmpeg를 쓰면 설치
