@@ -18,7 +18,7 @@ on:
         required: false
         default: "ubuntu-24.04"
       store:
-        description: "1이면 실행 파일·데이터를 Kaggle 대신 이 저장소 릴리스 rr-store에서 받음(KAGGLE-OFF 10/28, 비공개 저장소만)"
+        description: "1이면 실행 파일·데이터를 Kaggle 대신 이 저장소 릴리스 rr-store에서 받음(KAGGLE-OFF 10/28), 2면 받은 뒤 비밀값 RR_KEY로 암호를 풂(공개 저장소)"
         required: false
         default: ""
 permissions:
@@ -32,6 +32,7 @@ jobs:
         env:
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
           GH_TOKEN: ${{ github.token }}
+          RR_KEY: ${{ secrets.RR_KEY }}
           JOB: ${{ inputs.job }}
           DATASETS: ${{ inputs.datasets }}
           STORE: ${{ inputs.store }}
@@ -40,13 +41,24 @@ jobs:
           [[ "$DATASETS" =~ ^[A-Za-z0-9_,/.:-]*$ ]] || { echo "데이터 목록 이상"; exit 1; }
           sudo mkdir -p /kaggle/input /kaggle/working /kaggle/jobs
           sudo chown -R "$USER" /kaggle
-          if [ "$STORE" = "1" ]; then
+          if [ "$STORE" = "1" ] || [ "$STORE" = "2" ]; then
             # KAGGLE-OFF(10/28 Kaggle 계정 정지): PC(remote.mjs)가 띄우기 직전 이 저장소 릴리스 rr-store에 올린 run_<id>.py·<이름>.bin을 받음
             gh release download rr-store -R "$GITHUB_REPOSITORY" -p "run_$JOB.py" -D /kaggle/jobs
+            files="/kaggle/jobs/run_$JOB.py"
             for ds in ${DATASETS//,/ }; do
               s="${ds#local:}"; mkdir -p "/kaggle/input/$s"
               gh release download rr-store -R "$GITHUB_REPOSITORY" -p "$s.bin" -O "/kaggle/input/$s/bundle.bin"
+              files="$files /kaggle/input/$s/bundle.bin"
             done
+            if [ "$STORE" = "2" ]; then
+              # 공개 저장소(10/28): 릴리스엔 암호화된 것만 있음 → 비밀값 RR_KEY로 풂
+              [ -n "$RR_KEY" ] || { echo "RR_KEY 비밀값 없음"; exit 1; }
+              for f in $files; do
+                openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 -md sha256 -pass env:RR_KEY -in "$f" -out "$f.dec" || { echo "암호 풀기 실패: $f"; exit 1; }
+                mv "$f.dec" "$f"
+              done
+              echo "암호 풀기 끝($(echo $files | wc -w)개)"
+            fi
           else
             pip install --quiet kaggle==2.2.4
             for ds in ${DATASETS//,/ }; do
